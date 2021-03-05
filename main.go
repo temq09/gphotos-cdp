@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -50,6 +51,8 @@ var (
 	runFlag      = flag.String("run", "", "the program to run on each downloaded item, right after it is dowloaded. It is also the responsibility of that program to remove the downloaded item, if desired.")
 	verboseFlag  = flag.Bool("v", false, "be verbose")
 	headlessFlag = flag.Bool("headless", false, "Start chrome browser in headless mode (cannot do authentication this way).")
+	folderless   = flag.Bool("folderless", false, "save all files to one folder")
+	workDir      = flag.String("wrkdir", "", "Folder where all files initially downloaded")
 )
 
 var tick = 500 * time.Millisecond
@@ -72,9 +75,16 @@ func main() {
 	defer s.Shutdown()
 
 	log.Printf("Session Dir: %v", s.profileDir)
+	log.Printf("Work Dir: %v", s.wrkDir)
 
-	if err := s.cleanDlDir(); err != nil {
+	if err := cleanDlDir(s.wrkDir); err != nil {
+		log.Printf("Fail to clean work dir %s", s.wrkDir)
 		log.Fatal(err)
+	}
+	if !*folderless {
+		if err := cleanDlDir(s.dlDir); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	ctx, cancel := s.NewContext()
@@ -97,6 +107,7 @@ type Session struct {
 	parentContext context.Context
 	parentCancel  context.CancelFunc
 	dlDir         string // dir where the photos get stored
+	wrkDir        string // folder to initial download
 	profileDir    string // user data session dir. automatically created on chrome startup.
 	// lastDone is the most recent (wrt to Google Photos timeline) item (its URL
 	// really) that was downloaded. If set, it is used as a sentinel, to indicate that
@@ -123,7 +134,8 @@ func getLastDone(dlDir string) (string, error) {
 func NewSession() (*Session, error) {
 	var dir string
 	if *devFlag {
-		dir = filepath.Join(os.TempDir(), "gphotos-cdp")
+		//dir = filepath.Join(os.TempDir(), "gphotos-cdp")
+		dir = filepath.Join("/home/temq/prog/gphotos/", "test")
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
@@ -138,6 +150,11 @@ func NewSession() (*Session, error) {
 	if dlDir == "" {
 		dlDir = filepath.Join(os.Getenv("HOME"), "Downloads", "gphotos-cdp")
 	}
+	// if work dir is empty then just use destination dir
+	currentWorkDir := *workDir
+	if currentWorkDir == "" {
+		currentWorkDir = dlDir
+	}
 	if err := os.MkdirAll(dlDir, 0700); err != nil {
 		return nil, err
 	}
@@ -148,6 +165,7 @@ func NewSession() (*Session, error) {
 	s := &Session{
 		profileDir: dir,
 		dlDir:      dlDir,
+		wrkDir:     currentWorkDir,
 		lastDone:   lastDone,
 	}
 	return s, nil
@@ -180,11 +198,11 @@ func (s *Session) Shutdown() {
 }
 
 // cleanDlDir removes all files (but not directories) from s.dlDir
-func (s *Session) cleanDlDir() error {
-	if s.dlDir == "" {
+func cleanDlDir(dirPath string) error {
+	if dirPath == "" {
 		return nil
 	}
-	entries, err := ioutil.ReadDir(s.dlDir)
+	entries, err := ioutil.ReadDir(dirPath)
 	if err != nil {
 		return err
 	}
@@ -195,7 +213,7 @@ func (s *Session) cleanDlDir() error {
 		if v.Name() == ".lastdone" {
 			continue
 		}
-		if err := os.Remove(filepath.Join(s.dlDir, v.Name())); err != nil {
+		if err := os.Remove(filepath.Join(dirPath, v.Name())); err != nil {
 			return err
 		}
 	}
@@ -206,7 +224,7 @@ func (s *Session) cleanDlDir() error {
 // authenticated (or for 2 minutes to have elapsed).
 func (s *Session) login(ctx context.Context) error {
 	return chromedp.Run(ctx,
-		browser.SetDownloadBehavior(browser.SetDownloadBehaviorBehaviorAllow).WithDownloadPath(s.dlDir),
+		browser.SetDownloadBehavior(browser.SetDownloadBehaviorBehaviorAllow).WithDownloadPath(s.wrkDir),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			if *verboseFlag {
 				log.Printf("pre-navigate")
@@ -500,7 +518,7 @@ func startDownload(ctx context.Context) error {
 // dowload starts the download of the currently viewed item, and on successful
 // completion saves its location as the most recent item downloaded. It returns
 // with an error if the download stops making any progress for more than a minute.
-func (s *Session) download(ctx context.Context, location string) (string, error) {
+func (s *Session) download(ctx context.Context, location string, storeInOneFolder bool) (string, error) {
 
 	if err := startDownload(ctx); err != nil {
 		return "", err
@@ -519,12 +537,13 @@ func (s *Session) download(ctx context.Context, location string) (string, error)
 			return "", fmt.Errorf("hit deadline while downloading in %q", s.dlDir)
 		}
 
-		entries, err := ioutil.ReadDir(s.dlDir)
+		entries, err := os.ReadDir(s.wrkDir)
 		if err != nil {
 			return "", err
 		}
-		var fileEntries []os.FileInfo
+		var fileEntries []fs.DirEntry
 		for _, v := range entries {
+			log.Printf("Check for file: %s", v.Name())
 			if v.IsDir() {
 				continue
 			}
@@ -539,16 +558,21 @@ func (s *Session) download(ctx context.Context, location string) (string, error)
 		if len(fileEntries) < 1 {
 			continue
 		}
-		if len(fileEntries) > 1 {
-			return "", fmt.Errorf("more than one file (%d) in download dir %q", len(fileEntries), s.dlDir)
-		}
+		//if !storeInOneFolder && len(fileEntries) > 1 {
+		//	return "", fmt.Errorf("more than one file (%d) in download dir %q", len(fileEntries), s.dlDir)
+		//}
 		if !started {
 			if len(fileEntries) > 0 {
 				started = true
 				deadline = time.Now().Add(time.Minute)
 			}
 		}
-		newFileSize := fileEntries[0].Size()
+		info, err := fileEntries[0].Info()
+		if err != nil {
+			log.Printf("Warning: Can't read file info")
+			continue
+		}
+		newFileSize := info.Size()
 		if newFileSize > fileSize {
 			// push back the timeout as long as we make progress
 			deadline = time.Now().Add(time.Minute)
@@ -571,28 +595,65 @@ func (s *Session) download(ctx context.Context, location string) (string, error)
 // moveDownload creates a directory in s.dlDir named of the item ID found in
 // location. It then moves dlFile in that directory. It returns the new path
 // of the moved file.
-func (s *Session) moveDownload(ctx context.Context, dlFile, location string) (string, error) {
-	parts := strings.Split(location, "/")
-	if len(parts) < 5 {
-		return "", fmt.Errorf("not enough slash separated parts in location %v: %d", location, len(parts))
+func (s *Session) moveDownload(dlFile, location string, storeInSeparateFolder bool) (string, error) {
+	if storeInSeparateFolder {
+		parts := strings.Split(location, "/")
+		if len(parts) < 5 {
+			return "", fmt.Errorf("not enough slash separated parts in location %v: %d", location, len(parts))
+		}
+		newDir := filepath.Join(s.dlDir, parts[4])
+		if err := os.MkdirAll(newDir, 0700); err != nil {
+			return "", err
+		}
+		newFile := filepath.Join(newDir, dlFile)
+		if err := os.Rename(filepath.Join(s.dlDir, dlFile), newFile); err != nil {
+			return "", err
+		}
+		return newFile, nil
+	} else if s.wrkDir != s.dlDir {
+		newFile, err := createDestinationFile(s.dlDir, dlFile)
+		if err != nil {
+			return "", err
+		}
+
+		if err := os.Rename(filepath.Join(s.wrkDir, dlFile), newFile); err != nil {
+			return "", err
+		}
+		return newFile, nil
+	} else {
+		return filepath.Join(s.dlDir, dlFile), nil
 	}
-	newDir := filepath.Join(s.dlDir, parts[4])
-	if err := os.MkdirAll(newDir, 0700); err != nil {
-		return "", err
+}
+
+func createDestinationFile(folder string, fileName string) (string, error) {
+	var newFile = filepath.Join(folder, fileName)
+	for i := 1; i < 10; i++ {
+		if _, err := os.Stat(newFile); err == nil {
+			newFile = filepath.Join(folder, makeNumberFileName(fileName, i))
+		} else if os.IsNotExist(err) {
+			return newFile, nil
+		} else {
+			return "", err
+		}
 	}
-	newFile := filepath.Join(newDir, dlFile)
-	if err := os.Rename(filepath.Join(s.dlDir, dlFile), newFile); err != nil {
-		return "", err
+	return filepath.Join(folder, fmt.Sprintf("%d_%s", time.Now().Unix(), fileName)), nil
+}
+
+func makeNumberFileName(fileName string, index int) string {
+	extensionStartIndex := strings.LastIndex(fileName, ".")
+	if extensionStartIndex <= 0 {
+		return fmt.Sprintf("%s_%d", fileName[:], index)
 	}
-	return newFile, nil
+	return fmt.Sprintf("%s_(%d)%s", fileName[:extensionStartIndex], index, fileName[extensionStartIndex:])
 }
 
 func (s *Session) dlAndMove(ctx context.Context, location string) (string, error) {
-	dlFile, err := s.download(ctx, location)
+	var keepInOneFolder = *folderless
+	dlFile, err := s.download(ctx, location, keepInOneFolder)
 	if err != nil {
 		return "", err
 	}
-	return s.moveDownload(ctx, dlFile, location)
+	return s.moveDownload(dlFile, location, !*folderless)
 }
 
 var (
