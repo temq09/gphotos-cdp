@@ -134,8 +134,7 @@ func getLastDone(dlDir string) (string, error) {
 func NewSession() (*Session, error) {
 	var dir string
 	if *devFlag {
-		//dir = filepath.Join(os.TempDir(), "gphotos-cdp")
-		dir = filepath.Join("/home/temq/prog/gphotos/", "test")
+		dir = filepath.Join(os.TempDir(), "gphotos-cdp")
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
@@ -558,9 +557,9 @@ func (s *Session) download(ctx context.Context, location string, storeInOneFolde
 		if len(fileEntries) < 1 {
 			continue
 		}
-		//if !storeInOneFolder && len(fileEntries) > 1 {
-		//	return "", fmt.Errorf("more than one file (%d) in download dir %q", len(fileEntries), s.dlDir)
-		//}
+		if !storeInOneFolder && len(fileEntries) > 1 {
+			return "", fmt.Errorf("more than one file (%d) in download dir %q", len(fileEntries), s.dlDir)
+		}
 		if !started {
 			if len(fileEntries) > 0 {
 				started = true
