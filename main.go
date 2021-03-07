@@ -24,7 +24,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -536,11 +535,11 @@ func (s *Session) download(ctx context.Context, location string, storeInOneFolde
 			return "", fmt.Errorf("hit deadline while downloading in %q", s.dlDir)
 		}
 
-		entries, err := os.ReadDir(s.wrkDir)
+		entries, err := ioutil.ReadDir(s.wrkDir)
 		if err != nil {
 			return "", err
 		}
-		var fileEntries []fs.DirEntry
+		var fileEntries []os.FileInfo
 		for _, v := range entries {
 			log.Printf("Check for file: %s", v.Name())
 			if v.IsDir() {
@@ -566,12 +565,12 @@ func (s *Session) download(ctx context.Context, location string, storeInOneFolde
 				deadline = time.Now().Add(time.Minute)
 			}
 		}
-		info, err := fileEntries[0].Info()
-		if err != nil {
-			log.Printf("Warning: Can't read file info")
-			continue
-		}
-		newFileSize := info.Size()
+		//info, err := fileEntries[0].Info()
+		//if err != nil {
+		//	log.Printf("Warning: Can't read file info")
+		//	continue
+		//}
+		newFileSize := fileEntries[0].Size()
 		if newFileSize > fileSize {
 			// push back the timeout as long as we make progress
 			deadline = time.Now().Add(time.Minute)
