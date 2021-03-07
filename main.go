@@ -52,7 +52,6 @@ var (
 	verboseFlag  = flag.Bool("v", false, "be verbose")
 	headlessFlag = flag.Bool("headless", false, "Start chrome browser in headless mode (cannot do authentication this way).")
 	folderless   = flag.Bool("folderless", false, "save all files to one folder")
-	workDir      = flag.String("wrkdir", "", "Folder where all files initially downloaded")
 )
 
 var tick = 500 * time.Millisecond
@@ -100,6 +99,7 @@ func main() {
 	); err != nil {
 		log.Fatal(err)
 	}
+	s.clearTmpDir()
 	fmt.Println("OK")
 }
 
@@ -134,7 +134,8 @@ func getLastDone(dlDir string) (string, error) {
 func NewSession() (*Session, error) {
 	var dir string
 	if *devFlag {
-		dir = filepath.Join(os.TempDir(), "gphotos-cdp")
+		dir = filepath.Join("/home/temq/prog/gphotos/", "test")
+		//dir = filepath.Join(os.TempDir(), "gphotos-cdp")
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
@@ -149,15 +150,14 @@ func NewSession() (*Session, error) {
 	if dlDir == "" {
 		dlDir = filepath.Join(os.Getenv("HOME"), "Downloads", "gphotos-cdp")
 	}
-	// if work dir is empty then just use destination dir
-	currentWorkDir := *workDir
-	if currentWorkDir == "" {
-		currentWorkDir = dlDir
-	}
 	if err := os.MkdirAll(dlDir, 0700); err != nil {
 		return nil, err
 	}
 	lastDone, err := getLastDone(dlDir)
+	if err != nil {
+		return nil, err
+	}
+	currentWorkDir, err := prepareTmpDir(dlDir)
 	if err != nil {
 		return nil, err
 	}
@@ -728,5 +728,21 @@ func (s *Session) navN(N int) func(context.Context) error {
 			}
 		}
 		return nil
+	}
+}
+
+func prepareTmpDir(baseDir string) (string, error) {
+	currentTime := time.Now().Unix()
+	dir := filepath.Join(baseDir, fmt.Sprintf("gphotos-cdp-tmp-%d", currentTime))
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func (s *Session) clearTmpDir() {
+	err := os.Remove(s.wrkDir)
+	if err != nil {
+		log.Printf("Error while cleaning tmp dir: %s", err.Error())
 	}
 }
