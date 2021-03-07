@@ -734,7 +734,7 @@ func (s *Session) navN(N int) func(context.Context) error {
 func prepareTmpDir(baseDir string) (string, error) {
 	currentTime := time.Now().Unix()
 	dir := filepath.Join(baseDir, fmt.Sprintf("gphotos-cdp-tmp-%d", currentTime))
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
 		return "", err
 	}
 	return dir, nil
