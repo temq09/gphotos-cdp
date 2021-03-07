@@ -1,8 +1,8 @@
 module github.com/temq09/gphotos-cdp
 
-go 1.12
+go 1.16
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20200608134039-8a80cdaf865c
-	github.com/chromedp/chromedp v0.5.4-0.20200624114048-353306f986a8
+	github.com/chromedp/cdproto v0.0.0-20210222063305-a3ac505ff0bd
+	github.com/chromedp/chromedp v0.6.6
 )
