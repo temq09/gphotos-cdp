@@ -733,8 +733,10 @@ func (s *Session) navN(N int) func(context.Context) error {
 
 func prepareTmpDir(baseDir string) (string, error) {
 	currentTime := time.Now().Unix()
+	log.Print("Create a temporary folder for new photo")
 	dir := filepath.Join(baseDir, fmt.Sprintf("gphotos-cdp-tmp-%d", currentTime))
 	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		log.Printf("Unable to create the temporary folder: %s", err.Error())
 		return "", err
 	}
 	return dir, nil
