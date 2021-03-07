@@ -643,7 +643,7 @@ func makeNumberFileName(fileName string, index int) string {
 	if extensionStartIndex <= 0 {
 		return fmt.Sprintf("%s_%d", fileName[:], index)
 	}
-	return fmt.Sprintf("%s_(%d)%s", fileName[:extensionStartIndex], index, fileName[extensionStartIndex:])
+	return fmt.Sprintf("%s_copy_%d%s", fileName[:extensionStartIndex], index, fileName[extensionStartIndex:])
 }
 
 func (s *Session) dlAndMove(ctx context.Context, location string) (string, error) {
