@@ -134,8 +134,8 @@ func getLastDone(dlDir string) (string, error) {
 func NewSession() (*Session, error) {
 	var dir string
 	if *devFlag {
-		dir = filepath.Join("/home/temq/prog/gphotos/", "test")
-		//dir = filepath.Join(os.TempDir(), "gphotos-cdp")
+		//dir = filepath.Join("/home/temq/prog/gphotos/", "test")
+		dir = filepath.Join(os.TempDir(), "gphotos-cdp")
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
