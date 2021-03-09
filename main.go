@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"io/ioutil"
 	"log"
@@ -56,6 +57,8 @@ var (
 
 var tick = 500 * time.Millisecond
 
+const chunkSize = 64000
+
 func main() {
 	flag.Parse()
 	if *nItemsFlag == 0 {
@@ -76,10 +79,6 @@ func main() {
 	log.Printf("Session Dir: %v", s.profileDir)
 	log.Printf("Work Dir: %v", s.wrkDir)
 
-	if err := cleanDlDir(s.wrkDir); err != nil {
-		log.Printf("Fail to clean work dir %s", s.wrkDir)
-		log.Fatal(err)
-	}
 	if !*folderless {
 		if err := cleanDlDir(s.dlDir); err != nil {
 			log.Fatal(err)
@@ -134,7 +133,6 @@ func getLastDone(dlDir string) (string, error) {
 func NewSession() (*Session, error) {
 	var dir string
 	if *devFlag {
-		//dir = filepath.Join("/home/temq/prog/gphotos/", "test")
 		dir = filepath.Join(os.TempDir(), "gphotos-cdp")
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
@@ -610,12 +608,13 @@ func (s *Session) moveDownload(dlFile, location string, storeInSeparateFolder bo
 		}
 		return newFile, nil
 	} else if s.wrkDir != s.dlDir {
-		newFile, err := createDestinationFile(s.dlDir, dlFile)
+		sourceFile := filepath.Join(s.wrkDir, dlFile)
+		newFile, err := createDestinationFile(s.dlDir, dlFile, sourceFile)
 		if err != nil {
 			return "", err
 		}
 
-		if err := os.Rename(filepath.Join(s.wrkDir, dlFile), newFile); err != nil {
+		if err := os.Rename(sourceFile, newFile); err != nil {
 			return "", err
 		}
 		return newFile, nil
@@ -624,18 +623,57 @@ func (s *Session) moveDownload(dlFile, location string, storeInSeparateFolder bo
 	}
 }
 
-func createDestinationFile(folder string, fileName string) (string, error) {
-	var newFile = filepath.Join(folder, fileName)
+func createDestinationFile(destinationFolder string, destinationFileName string, sourceFile string) (string, error) {
+	var newFile = filepath.Join(destinationFolder, destinationFileName)
 	for i := 1; i < 10; i++ {
 		if _, err := os.Stat(newFile); err == nil {
-			newFile = filepath.Join(folder, makeNumberFileName(fileName, i))
+			if isFileTheSame(sourceFile, newFile) {
+				return newFile, nil
+			}
+			newFile = filepath.Join(destinationFolder, makeNumberFileName(destinationFileName, i))
 		} else if os.IsNotExist(err) {
 			return newFile, nil
 		} else {
 			return "", err
 		}
 	}
-	return filepath.Join(folder, fmt.Sprintf("%d_%s", time.Now().Unix(), fileName)), nil
+	return filepath.Join(destinationFolder, fmt.Sprintf("%d_%s", time.Now().Unix(), destinationFileName)), nil
+}
+
+func isFileTheSame(firstFile string, secondFile string) bool {
+	f1, err1 := os.Open(firstFile)
+	if err1 != nil {
+		log.Fatal("Can't open first file", err1.Error())
+	}
+	defer f1.Close()
+
+	f2, err2 := os.Open(secondFile)
+	if err2 != nil {
+		log.Fatal("Can't open second file", err2)
+	}
+	defer f2.Close()
+
+	for {
+		chunkOne := make([]byte, chunkSize)
+		_, err1 := f1.Read(chunkOne)
+
+		chunkTwo := make([]byte, chunkSize)
+		_, err2 := f2.Read(chunkTwo)
+
+		if err1 != nil || err2 != nil {
+			if err1 == io.EOF && err2 == io.EOF {
+				return true
+			} else if err1 == io.EOF || err2 == io.EOF {
+				return false
+			} else {
+				log.Fatal(err1, err2)
+			}
+		}
+
+		if !bytes.Equal(chunkOne, chunkTwo) {
+			return false
+		}
+	}
 }
 
 func makeNumberFileName(fileName string, index int) string {
