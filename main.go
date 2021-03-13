@@ -53,6 +53,7 @@ var (
 	verboseFlag  = flag.Bool("v", false, "be verbose")
 	headlessFlag = flag.Bool("headless", false, "Start chrome browser in headless mode (cannot do authentication this way).")
 	folderless   = flag.Bool("folderless", false, "save all files to one folder")
+	devTools     = flag.Bool("devtools", true, "Start Chrome with active dev tools")
 )
 
 var tick = 500 * time.Millisecond
@@ -76,8 +77,8 @@ func main() {
 	}
 	defer s.Shutdown()
 
-	log.Printf("Session Dir: %v", s.profileDir)
-	log.Printf("Work Dir: %v", s.wrkDir)
+	printInVerbose("Session Dir: %v", s.profileDir)
+	printInVerbose("Work Dir: %v", s.wrkDir)
 
 	if !*folderless {
 		if err := cleanDlDir(s.dlDir); err != nil {
@@ -133,7 +134,8 @@ func getLastDone(dlDir string) (string, error) {
 func NewSession() (*Session, error) {
 	var dir string
 	if *devFlag {
-		dir = filepath.Join(os.TempDir(), "gphotos-cdp")
+		dir = filepath.Join("/home/temq/prog/gphotos/", "test")
+		//dir = filepath.Join(os.TempDir(), "gphotos-cdp")
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
 		}
@@ -174,6 +176,10 @@ func (s *Session) NewContext() (context.Context, context.CancelFunc) {
 		chromedp.DisableGPU,
 		chromedp.UserDataDir(s.profileDir),
 	)
+
+	if *devTools {
+		opts = append(opts, chromedp.Flag("auto-open-devtools-for-tabs", true))
+	}
 
 	if !*headlessFlag {
 		// undo the three opts in chromedp.Headless() which is included in DefaultExecAllocatorOptions
@@ -223,9 +229,7 @@ func (s *Session) login(ctx context.Context) error {
 	return chromedp.Run(ctx,
 		browser.SetDownloadBehavior(browser.SetDownloadBehaviorBehaviorAllow).WithDownloadPath(s.wrkDir),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			if *verboseFlag {
-				log.Printf("pre-navigate")
-			}
+			printInVerbose("pre-navigate")
 			return nil
 		}),
 		chromedp.Navigate("https://photos.google.com/"),
@@ -249,17 +253,13 @@ func (s *Session) login(ctx context.Context) error {
 				if *headlessFlag {
 					return errors.New("authentication not possible in -headless mode")
 				}
-				if *verboseFlag {
-					log.Printf("Not yet authenticated, at: %v", location)
-				}
+				printInVerbose("Not yet authenticated, at: %v", location)
 				time.Sleep(tick)
 			}
 			return nil
 		}),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			if *verboseFlag {
-				log.Printf("post-navigate")
-			}
+			printInVerbose("post-navigate")
 			return nil
 		}),
 	)
@@ -275,13 +275,17 @@ func (s *Session) firstNav(ctx context.Context) error {
 	}
 
 	if *startFlag != "" {
-		// TODO(mpl): use RunResponse
-		chromedp.Navigate(*startFlag).Do(ctx)
-		chromedp.WaitReady("body", chromedp.ByQuery).Do(ctx)
-		return nil
+		return navigateToUrl(ctx, *startFlag)
 	}
 	if s.lastDone != "" {
+		err := navigateToUrl(ctx, s.lastDone)
+		if err == nil {
+			return nil
+		}
+		log.Print("0")
+		log.Print(s.lastDone)
 		resp, err := chromedp.RunResponse(ctx, chromedp.Navigate(s.lastDone))
+		log.Print("1")
 		if err != nil {
 			return err
 		}
@@ -290,7 +294,7 @@ func (s *Session) firstNav(ctx context.Context) error {
 			return nil
 		}
 		lastDoneFile := filepath.Join(s.dlDir, ".lastdone")
-		log.Printf("%s does not seem to exist anymore. Removing %s.", s.lastDone, lastDoneFile)
+		printInVerbose("%s does not seem to exist anymore. Removing %s.", s.lastDone, lastDoneFile)
 		s.lastDone = ""
 		if err := os.Remove(lastDoneFile); err != nil {
 			if os.IsNotExist(err) {
@@ -300,15 +304,10 @@ func (s *Session) firstNav(ctx context.Context) error {
 		}
 
 		// restart from scratch
-		resp, err = chromedp.RunResponse(ctx, chromedp.Navigate("https://photos.google.com/"))
+		err = navigateToUrl(ctx, "https://photos.google.com/")
 		if err != nil {
 			return err
 		}
-		code := resp.Status
-		if code != http.StatusOK {
-			return fmt.Errorf("unexpected %d code when restarting to https://photos.google.com/", code)
-		}
-		chromedp.WaitReady("body", chromedp.ByQuery).Do(ctx)
 	}
 
 	if err := navToEnd(ctx); err != nil {
@@ -320,6 +319,19 @@ func (s *Session) firstNav(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func navigateToUrl(ctx context.Context, url string) error {
+	resp, err := chromedp.RunResponse(ctx, chromedp.Navigate(url))
+	log.Print("1")
+	if err != nil {
+		return err
+	}
+	if resp.Status == http.StatusOK {
+		chromedp.WaitReady("body", chromedp.ByQuery).Do(ctx)
+		return nil
+	}
+	return fmt.Errorf("wrong response status fro %s, expected Ok, actuall %d - %s", url, resp.Status, resp.StatusText)
 }
 
 // setFirstItem looks for the first item, and sets it as s.firstItem.
@@ -351,9 +363,7 @@ func (s *Session) setFirstItem(ctx context.Context) error {
 		s.firstItem = strings.TrimPrefix(photoHref, "./photo/")
 		break
 	}
-	if *verboseFlag {
-		log.Printf("Page loaded, most recent item in the feed is: %s", s.firstItem)
-	}
+	printInVerbose("Page loaded, most recent item in the feed is: %s", s.firstItem)
 	return nil
 }
 
@@ -377,9 +387,7 @@ func navToEnd(ctx context.Context) error {
 		time.Sleep(tick)
 	}
 
-	if *verboseFlag {
-		log.Printf("Successfully jumped to the end")
-	}
+	printInVerbose("Successfully jumped to the end")
 
 	return nil
 }
@@ -403,7 +411,7 @@ func navToLast(ctx context.Context) error {
 		if !ready {
 			if location != "https://photos.google.com/" {
 				ready = true
-				log.Printf("Nav to the end sequence is started because location is %v", location)
+				printInVerbose("Nav to the end sequence is started because location is %v", location)
 			}
 			continue
 		}
@@ -421,9 +429,7 @@ func doRun(filePath string) error {
 	if *runFlag == "" {
 		return nil
 	}
-	if *verboseFlag {
-		log.Printf("Running %v on %v", *runFlag, filePath)
-	}
+	printInVerbose("Running %v on %v", *runFlag, filePath)
 	cmd := exec.Command(*runFlag, filePath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -457,9 +463,7 @@ func navLeft(ctx context.Context) error {
 // markDone saves location in the dldir/.lastdone file, to indicate it is the
 // most recent item downloaded
 func markDone(dldir, location string) error {
-	if *verboseFlag {
-		log.Printf("Marking %v as done", location)
-	}
+	printInVerbose("Marking %v as done", location)
 	oldPath := filepath.Join(dldir, ".lastdone")
 	newPath := oldPath + ".bak"
 	if err := os.Rename(oldPath, newPath); err != nil {
@@ -502,9 +506,7 @@ func startDownload(ctx context.Context) error {
 	up.Type = input.KeyUp
 
 	for _, ev := range []*input.DispatchKeyEventParams{&down, &up} {
-		if *verboseFlag {
-			log.Printf("Event: %+v", *ev)
-		}
+		printInVerbose("Event: %+v", *ev)
 		if err := ev.Do(ctx); err != nil {
 			return err
 		}
@@ -540,7 +542,7 @@ func (s *Session) download(ctx context.Context, location string, storeInOneFolde
 		}
 		var fileEntries []fs.DirEntry
 		for _, v := range entries {
-			log.Printf("Check for file: %s", v.Name())
+			printInVerbose("Check for file: %s", v.Name())
 			if v.IsDir() {
 				continue
 			}
@@ -784,5 +786,11 @@ func (s *Session) clearTmpDir() {
 	err := os.Remove(s.wrkDir)
 	if err != nil {
 		log.Printf("Error while cleaning tmp dir: %s", err.Error())
+	}
+}
+
+func printInVerbose(format string, v ...interface{}) {
+	if *verboseFlag {
+		log.Printf(format, v)
 	}
 }
